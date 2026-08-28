@@ -5,9 +5,11 @@ Manages candidate profiles, interview history, and scoring
 
 import logging
 import uuid
+from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from fastapi import HTTPException
+from sqlalchemy import Text, cast, or_, select
 
 from database.db import SessionLocal
 from database.models import Candidate, InterviewSession
@@ -17,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class CandidateManager:
-    """Manages candidate profiles, history, and scoring"""
+    """Manages candidate profiles, history, and scoring."""
 
     def __init__(self):
         pass
@@ -36,8 +38,8 @@ class CandidateManager:
         candidate_id = f"candidate_{uuid.uuid4().hex[:12]}"
         now = utcnow()
         token = "".join(random.choices("0123456789", k=6))
-
         db = SessionLocal()
+
         try:
             candidate = Candidate(
                 candidate_id=candidate_id,
@@ -58,14 +60,14 @@ class CandidateManager:
                 created_at=now,
                 updated_at=now,
             )
+
             db.add(candidate)
             db.commit()
 
-            logger.info(f"Created candidate {candidate_id}: {name}")
             return {
                 "candidate_id": candidate_id,
-                "name": name.strip(),
-                "email": email.strip().lower(),
+                "name": candidate.name,
+                "email": candidate.email,
                 "resume_text": resume_text,
                 "skills": skills or [],
                 "interview_history": [],
@@ -80,22 +82,31 @@ class CandidateManager:
                 "role": role,
                 "created_at": now.isoformat(),
             }
-        except Exception as e:
+
+        except Exception:
             db.rollback()
-            logger.error(f"Error creating candidate: {e}")
             raise
         finally:
             db.close()
 
-    def get_candidate(self, candidate_id: str) -> dict[str, Any] | None:
-        """Get candidate by ID"""
+    def get_candidate(
+        self,
+        candidate_id: str,
+    ) -> dict[str, Any] | None:
+
         db = SessionLocal()
+
         try:
             c = db.execute(
-                select(Candidate).where(Candidate.candidate_id == candidate_id)
+                select(Candidate).where(
+                    Candidate.candidate_id == candidate_id,
+                    Candidate.deleted_at.is_(None),
+                )
             ).scalar_one_or_none()
+
             if not c:
                 return None
+
             return {
                 "candidate_id": c.candidate_id,
                 "name": c.name,
@@ -115,30 +126,77 @@ class CandidateManager:
                 "created_at": c.created_at.isoformat() if c.created_at else None,
                 "updated_at": c.updated_at.isoformat() if c.updated_at else None,
             }
+
         finally:
             db.close()
 
     def list_candidates(
         self,
+        limit: int = 20,
+        offset: int = 0,
         search: str | None = None,
         status: str | None = None,
         role: str | None = None,
-        limit: int = 100,
+        skill: str | None = None,
+        position: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> list[dict[str, Any]]:
-        """List all candidates with search and filter support"""
         from sqlalchemy import func
-        db = SessionLocal()
-        try:
-            stmt = select(Candidate)
-            if search:
-                stmt = stmt.where(Candidate.name.ilike(f"%{search.strip()}%"))
-            if status:
-                stmt = stmt.where(func.lower(Candidate.status) == status.strip().lower())
-            if role:
-                stmt = stmt.where(func.lower(Candidate.role) == role.strip().lower())
 
-            stmt = stmt.order_by(Candidate.created_at.desc()).limit(limit)
-            rows = db.execute(stmt).scalars().all()
+        db = SessionLocal()
+
+        try:
+            query = select(Candidate)
+            query = query.where(Candidate.deleted_at.is_(None))
+
+            if search and search.strip():
+                value = search.strip()
+
+                query = query.where(
+                    or_(
+                        Candidate.name.ilike(f"%{value}%"),
+                        Candidate.email.ilike(f"%{value}%"),
+                    )
+                )
+
+            if status and status.strip():
+                query = query.where(func.lower(Candidate.status) == status.strip().lower())
+
+            if role and role.strip():
+                query = query.where(func.lower(Candidate.role) == role.strip().lower())
+
+            if skill and skill.strip():
+
+                query = query.where(
+                    cast(Candidate.skills, Text).ilike(f"%{skill.strip()}%")
+                )
+            # Position filter
+            if position and position.strip():
+                query = query.where(
+                    Candidate.interview_sessions.any(
+                        InterviewSession.position.ilike(f"%{position.strip()}%")
+                    )
+                )
+
+            # Date range filter
+            if date_from:
+                start_date = datetime.fromisoformat(date_from)
+                query = query.where(Candidate.created_at >= start_date)
+
+            if date_to:
+                end_date = datetime.fromisoformat(date_to) + timedelta(days=1)
+                query = query.where(Candidate.created_at < end_date)
+
+            rows = (
+                db.execute(
+                    query.order_by(Candidate.created_at.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
 
             return [
                 {
@@ -155,10 +213,53 @@ class CandidateManager:
                     "badges": getattr(c, "badges", []) or [],
                     "status": getattr(c, "status", "unverified"),
                     "role": getattr(c, "role", None),
-                    "created_at": c.created_at.isoformat() if c.created_at else None,
+                    "active_sessions": sum(
+                        1
+                        for session in c.interview_sessions
+                        if session.status
+                        not in {"COMPLETED", "FAILED", "TIMEOUT", "CANCELLED"}
+                    ),
+                    "completed_sessions": sum(
+                        1
+                        for session in c.interview_sessions
+                        if session.status == "COMPLETED"
+                    ),
+                    "created_at": (c.created_at.isoformat() if c.created_at else None),
+                    "updated_at": (c.updated_at.isoformat() if c.updated_at else None),
                 }
                 for c in rows
             ]
+
+        except Exception as e:
+            logger.error(f"Error listing candidates: {e!s}")
+            raise HTTPException(
+                status_code=500,
+                detail="Error listing candidates",
+            )
+
+        finally:
+            db.close()
+
+    def delete_candidate(self, candidate_id: str) -> bool:
+
+        db = SessionLocal()
+
+        try:
+
+            c = db.execute(
+                select(Candidate).where(
+                    Candidate.candidate_id == candidate_id,
+                    Candidate.deleted_at.is_(None),
+                )
+            ).scalar_one_or_none()
+
+            if not c:
+                return False
+
+            c.deleted_at = utcnow()
+            db.commit()
+            return True
+
         finally:
             db.close()
 
@@ -251,18 +352,24 @@ class CandidateManager:
             db.close()
 
     def update_candidate_score(
-        self, candidate_id: str, session_id: str, score: float
+        self,
+        candidate_id: str,
+        session_id: str,
+        score: float,
     ) -> bool:
-        """Update candidate's running average score after an interview"""
+
         db = SessionLocal()
+
         try:
             c = db.execute(
                 select(Candidate).where(Candidate.candidate_id == candidate_id)
             ).scalar_one_or_none()
+
             if not c:
                 return False
 
             history = list(c.interview_history or [])
+
             history.append(
                 {
                     "session_id": session_id,
@@ -272,6 +379,7 @@ class CandidateManager:
             )
 
             total = c.total_interviews + 1
+
             if c.avg_score is None:
                 c.avg_score = score
             else:
@@ -280,25 +388,32 @@ class CandidateManager:
             c.interview_history = history
             c.total_interviews = total
             c.updated_at = utcnow()
+
             db.commit()
             db.close()
             
             # Record practice outside active session transaction to avoid locking
             self.record_practice(candidate_id)
             return True
+
         except Exception as e:
             db.rollback()
             logger.error(f"Error updating candidate score: {e}")
             return False
+
         finally:
             try:
                 db.close()
             except Exception:
                 pass
 
-    def get_interview_history(self, candidate_id: str) -> list[dict[str, Any]]:
-        """Get interview history for a candidate"""
+    def get_interview_history(
+        self,
+        candidate_id: str,
+    ) -> list[dict[str, Any]]:
+
         db = SessionLocal()
+
         try:
             rows = (
                 db.execute(
@@ -316,12 +431,13 @@ class CandidateManager:
                     "status": r.status,
                     "overall_score": r.overall_score,
                     "risk_score": r.risk_score,
-                    "start_time": r.start_time.isoformat() if r.start_time else None,
-                    "end_time": r.end_time.isoformat() if r.end_time else None,
-                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "start_time": (r.start_time.isoformat() if r.start_time else None),
+                    "end_time": (r.end_time.isoformat() if r.end_time else None),
+                    "created_at": (r.created_at.isoformat() if r.created_at else None),
                 }
                 for r in rows
             ]
+
         finally:
             db.close()
 

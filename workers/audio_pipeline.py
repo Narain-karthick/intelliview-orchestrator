@@ -31,6 +31,66 @@ AUDIO_TEMP_DIR = os.getenv("AUDIO_TEMP_DIR")
 CHUNK_DURATION_MS = 5000
 
 
+class InvalidAudioError(Exception):
+    """Raised when audio input is missing, empty, or cannot be decoded.
+
+    This is the "handled error" surfaced to callers for corrupt or invalid
+    audio input (see issue #44), as opposed to letting a raw decode
+    exception (e.g. pydub's CouldntDecodeError) crash the worker.
+    """
+
+
+def _validate_audio_input(audio_path: str) -> None:
+    """Validate that ``audio_path`` refers to a readable, non-empty,
+    decodable audio file.
+
+    Only performs local validation when ``audio_path`` actually exists on
+    disk. Some callers pass a remote URL / stream identifier as
+    ``session_id`` instead of a local path (see ``_real_transcribe`` and
+    friends) — in that case there is nothing to validate locally, so this
+    is a no-op and the existing downstream handling (real client calls with
+    their own try/except + stub fallback) is left untouched, per the
+    "do not modify audio-analysis logic" scope of #44.
+
+    Raises:
+        InvalidAudioError: if the input is missing, empty, or corrupt.
+    """
+    if not audio_path:
+        raise InvalidAudioError("No audio input provided.")
+
+    path = Path(audio_path)
+    if not path.exists():
+        return
+
+    if not path.is_file():
+        raise InvalidAudioError(f"Audio input is not a file: {audio_path}")
+
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise InvalidAudioError(f"Could not read audio input {audio_path}: {exc}") from exc
+
+    if size == 0:
+        raise InvalidAudioError(f"Audio input is empty: {audio_path}")
+
+    try:
+        from pydub import AudioSegment
+
+        decoded = AudioSegment.from_file(audio_path)
+    except ImportError:
+        # pydub isn't installed — nothing more we can check locally; let
+        # downstream real/stub helpers handle it as before.
+        return
+    except Exception as exc:
+        reason = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+        raise InvalidAudioError(
+            f"Audio input is corrupt or unreadable: {audio_path} ({reason})"
+        ) from exc
+
+    if len(decoded) == 0:
+        raise InvalidAudioError(f"Audio input contains no audio data: {audio_path}")
+
+
 def split_audio_into_chunks(
     audio_path: str,
     chunk_duration_ms: int = CHUNK_DURATION_MS,
@@ -39,10 +99,19 @@ def split_audio_into_chunks(
     Split an audio file into fixed-size WAV chunks.
     Returns:
         chunk_paths, temp_directory
+
+    Raises:
+        InvalidAudioError: if ``audio_path`` is missing, empty, or corrupt.
     """
     from pydub import AudioSegment
 
-    audio = AudioSegment.from_file(audio_path)
+    _validate_audio_input(audio_path)
+
+    try:
+        audio = AudioSegment.from_file(audio_path)
+    except Exception as exc:
+        reason = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+        raise InvalidAudioError(f"Could not decode audio file: {audio_path} ({reason})") from exc
 
     chunk_temp_dir = tempfile.mkdtemp(prefix="audio_chunks_")
 
@@ -329,6 +398,20 @@ def _real_detect_suspicious(session_id: str) -> SuspiciousPatternResult | None:
 def run_audio_analysis(session_id: str) -> dict[str, Any]:
     """Execute audio analysis pipeline for an interview session."""
     logger.info(f"Starting audio analysis for session {session_id}")
+
+    try:
+        _validate_audio_input(session_id)
+    except InvalidAudioError as exc:
+        logger.warning("Invalid audio input for session %s: %s", session_id, exc)
+        return {
+            "session_id": session_id,
+            "error": str(exc),
+            "error_type": "invalid_audio_input",
+            "transcription": None,
+            "background_voices": None,
+            "suspicious_conversation": None,
+            "risk_score": 0.0,
+        }
 
     transcription = transcribe_speech(session_id)
     bg_voices = detect_background_voices(session_id)
