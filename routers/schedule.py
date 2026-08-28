@@ -85,7 +85,7 @@ def create_schedule_routes() -> APIRouter:
             if not getattr(candidate, "is_verified", False):
                 raise HTTPException(
                     status_code=400,
-                    detail="Candidate must be verified before booking an interview slot.",
+                    detail=f"Candidate must be verified ({candidate.status}) before booking an interview slot.",
                 )
 
             # Ensure datetime is timezone-aware

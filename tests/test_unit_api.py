@@ -267,6 +267,8 @@ def schedule_candidate(schedule_db):
         candidate_id="test-candidate-19",
         name="Test Candidate",
         email="test@example.com",
+        is_verified=True,
+        email="test@example.com",
     )
 
     schedule_db.add(candidate)
