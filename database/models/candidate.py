@@ -1,6 +1,6 @@
 """Candidate ORM model."""
 
-from sqlalchemy import JSON, Column, DateTime, Float, Integer, String, Boolean
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String
 from sqlalchemy.orm import relationship
 
 from database.models._base import Base, utcnow
@@ -35,7 +35,9 @@ class Candidate(Base):
     role = Column(String(100), nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
+    )
     deleted_at = Column(DateTime, nullable=True, index=True, default=None)
 
     interview_sessions = relationship("InterviewSession", back_populates="candidate")

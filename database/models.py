@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -14,7 +15,6 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
-    Boolean,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func  # noqa: F401  (re-exported for ORM consumers)

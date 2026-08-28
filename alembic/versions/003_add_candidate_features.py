@@ -7,6 +7,7 @@ Create Date: 2026-08-27
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "003_add_candidate_features"
@@ -16,12 +17,33 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("candidates", sa.Column("is_verified", sa.Boolean(), nullable=False, server_default=sa.false()))
-    op.add_column("candidates", sa.Column("verification_token", sa.String(length=50), nullable=True))
-    op.add_column("candidates", sa.Column("practice_streak", sa.Integer(), nullable=False, server_default=sa.text("0")))
-    op.add_column("candidates", sa.Column("last_practice_date", sa.DateTime(timezone=True), nullable=True))
+    op.add_column(
+        "candidates",
+        sa.Column(
+            "is_verified", sa.Boolean(), nullable=False, server_default=sa.false()
+        ),
+    )
+    op.add_column(
+        "candidates",
+        sa.Column("verification_token", sa.String(length=50), nullable=True),
+    )
+    op.add_column(
+        "candidates",
+        sa.Column(
+            "practice_streak", sa.Integer(), nullable=False, server_default=sa.text("0")
+        ),
+    )
+    op.add_column(
+        "candidates",
+        sa.Column("last_practice_date", sa.DateTime(timezone=True), nullable=True),
+    )
     op.add_column("candidates", sa.Column("badges", sa.JSON(), nullable=True))
-    op.add_column("candidates", sa.Column("status", sa.String(length=50), nullable=True, server_default="unverified"))
+    op.add_column(
+        "candidates",
+        sa.Column(
+            "status", sa.String(length=50), nullable=True, server_default="unverified"
+        ),
+    )
     op.add_column("candidates", sa.Column("role", sa.String(length=100), nullable=True))
 
 

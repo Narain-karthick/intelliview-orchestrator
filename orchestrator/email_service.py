@@ -187,6 +187,7 @@ IntelliView Interview Team
         Send a verification email with an OTP/link to the candidate.
         """
         import html
+
         sender_email = self.settings.smtp_from_email or "notifications@intelliview.ai"
         host = self.settings.smtp_host or "localhost"
         port = self.settings.smtp_port or 1025
@@ -196,7 +197,9 @@ IntelliView Interview Team
         safe_token = html.escape(token)
 
         # Fallback logging for local development
-        logger.info(f"[DEV FALLBACK] Verification code generated for {candidate_email}: {token}")
+        logger.info(
+            f"[DEV FALLBACK] Verification code generated for {candidate_email}: {token}"
+        )
 
         subject = "Verify Your Email - IntelliView"
 

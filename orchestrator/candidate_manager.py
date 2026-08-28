@@ -35,6 +35,7 @@ class CandidateManager:
     ) -> dict[str, Any]:
         """Create a new candidate profile"""
         import random
+
         candidate_id = f"candidate_{uuid.uuid4().hex[:12]}"
         now = utcnow()
         token = "".join(random.choices("0123456789", k=6))
@@ -119,7 +120,11 @@ class CandidateManager:
                 "is_verified": getattr(c, "is_verified", False),
                 "verification_token": getattr(c, "verification_token", None),
                 "practice_streak": getattr(c, "practice_streak", 0),
-                "last_practice_date": c.last_practice_date.isoformat() if getattr(c, "last_practice_date", None) else None,
+                "last_practice_date": (
+                    c.last_practice_date.isoformat()
+                    if getattr(c, "last_practice_date", None)
+                    else None
+                ),
                 "badges": getattr(c, "badges", []) or [],
                 "status": getattr(c, "status", "unverified"),
                 "role": getattr(c, "role", None),
@@ -161,7 +166,9 @@ class CandidateManager:
                 )
 
             if status and status.strip():
-                query = query.where(func.lower(Candidate.status) == status.strip().lower())
+                query = query.where(
+                    func.lower(Candidate.status) == status.strip().lower()
+                )
 
             if role and role.strip():
                 query = query.where(func.lower(Candidate.role) == role.strip().lower())
@@ -209,7 +216,11 @@ class CandidateManager:
                     "is_verified": getattr(c, "is_verified", False),
                     "verification_token": getattr(c, "verification_token", None),
                     "practice_streak": getattr(c, "practice_streak", 0),
-                    "last_practice_date": c.last_practice_date.isoformat() if getattr(c, "last_practice_date", None) else None,
+                    "last_practice_date": (
+                        c.last_practice_date.isoformat()
+                        if getattr(c, "last_practice_date", None)
+                        else None
+                    ),
                     "badges": getattr(c, "badges", []) or [],
                     "status": getattr(c, "status", "unverified"),
                     "role": getattr(c, "role", None),
@@ -286,8 +297,10 @@ class CandidateManager:
 
     def record_practice(self, candidate_id: str) -> None:
         """Update consecutive practice day streak and badges for a candidate."""
-        from datetime import datetime, timezone, timedelta
+        from datetime import timedelta, timezone
+
         from sqlalchemy import func
+
         db = SessionLocal()
         try:
             candidate = db.execute(
@@ -330,10 +343,14 @@ class CandidateManager:
             elif streak >= 3 and "3-Day Streak" not in badges:
                 badges.append("3-Day Streak")
 
-            total_sessions = db.execute(
-                select(func.count(InterviewSession.session_id))
-                .where(InterviewSession.candidate_id == candidate_id)
-            ).scalar() or 0
+            total_sessions = (
+                db.execute(
+                    select(func.count(InterviewSession.session_id)).where(
+                        InterviewSession.candidate_id == candidate_id
+                    )
+                ).scalar()
+                or 0
+            )
 
             if total_sessions >= 10 and "Interview Veteran" not in badges:
                 badges.append("Interview Veteran")
@@ -344,7 +361,9 @@ class CandidateManager:
 
             candidate.badges = badges
             db.commit()
-            logger.info(f"Recorded practice for candidate {candidate_id}. Streak: {streak}, Badges: {badges}")
+            logger.info(
+                f"Recorded practice for candidate {candidate_id}. Streak: {streak}, Badges: {badges}"
+            )
         except Exception as e:
             db.rollback()
             logger.error(f"Error recording practice for candidate {candidate_id}: {e}")
@@ -391,7 +410,7 @@ class CandidateManager:
 
             db.commit()
             db.close()
-            
+
             # Record practice outside active session transaction to avoid locking
             self.record_practice(candidate_id)
             return True

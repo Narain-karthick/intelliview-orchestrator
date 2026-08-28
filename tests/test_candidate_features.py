@@ -2,17 +2,15 @@
 Integration tests for Candidate Streaks, Verification, and Search/Filters (Issue #58).
 """
 
-import pytest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch, MagicMock
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from unittest.mock import patch
 
-from database.db import Base, get_db
+import pytest
+from fastapi.testclient import TestClient
+
 from database.models import Candidate, InterviewSession
-from orchestrator.main import app
 from orchestrator.candidate_manager import candidate_manager
+from orchestrator.main import app
 from orchestrator.time_utils import utcnow
 
 client = TestClient(app)
@@ -21,7 +19,6 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def clean_db():
     from database.db import SessionLocal
-    from database.models import Candidate, InterviewSession
     from database.models.interview_schedule import InterviewSchedule
 
     db = SessionLocal()
@@ -54,7 +51,9 @@ def test_candidate_registration_sends_verification_email():
         "role": "Backend Engineer",
     }
 
-    with patch("orchestrator.email_service.email_service.send_verification_email") as mock_send:
+    with patch(
+        "orchestrator.email_service.email_service.send_verification_email"
+    ) as mock_send:
         mock_send.return_value = (True, "Email sent successfully")
         response = client.post("/candidates", json=payload)
 
@@ -138,10 +137,13 @@ def test_unverified_candidate_cannot_book_schedule():
     assert "must be verified" in sched_res.json()["detail"]
 
     # Verify the candidate
-    verify_res = client.post("/candidates/verify", json={
-        "email": "unverified@example.com",
-        "token": create_res.json()["verification_token"]
-    })
+    verify_res = client.post(
+        "/candidates/verify",
+        json={
+            "email": "unverified@example.com",
+            "token": create_res.json()["verification_token"],
+        },
+    )
     assert verify_res.status_code == 200
 
     # Attempt booking schedule again - should succeed
@@ -152,9 +154,33 @@ def test_unverified_candidate_cannot_book_schedule():
 def test_candidate_search_and_filters():
     """Verify that candidates endpoint supports search, status, and role filter."""
     # Register 3 distinct candidates
-    c1 = client.post("/candidates", json={"name": "Alice Software", "email": "alice@corp.com", "role": "SWE", "status": "unverified"}).json()
-    c2 = client.post("/candidates", json={"name": "Bob Frontend", "email": "bob@corp.com", "role": "Frontend Engineer", "status": "verified"}).json()
-    c3 = client.post("/candidates", json={"name": "Charlie Manager", "email": "charlie@corp.com", "role": "Product Manager", "status": "verified"}).json()
+    c1 = client.post(
+        "/candidates",
+        json={
+            "name": "Alice Software",
+            "email": "alice@corp.com",
+            "role": "SWE",
+            "status": "unverified",
+        },
+    ).json()
+    c2 = client.post(
+        "/candidates",
+        json={
+            "name": "Bob Frontend",
+            "email": "bob@corp.com",
+            "role": "Frontend Engineer",
+            "status": "verified",
+        },
+    ).json()
+    c3 = client.post(
+        "/candidates",
+        json={
+            "name": "Charlie Manager",
+            "email": "charlie@corp.com",
+            "role": "Product Manager",
+            "status": "verified",
+        },
+    ).json()
 
     # Test search by name (substring, case-insensitive)
     res_search = client.get("/candidates?search=alice")
@@ -179,7 +205,9 @@ def test_candidate_search_and_filters():
     assert not any(c["candidate_id"] == c3["candidate_id"] for c in candidates_role)
 
     # Test combinable filters
-    res_combined = client.get("/candidates?search=bob&status=verified&role=frontend%20engineer")
+    res_combined = client.get(
+        "/candidates?search=bob&status=verified&role=frontend%20engineer"
+    )
     assert res_combined.status_code == 200
     candidates_combined = res_combined.json()["candidates"]
     assert len(candidates_combined) == 1
@@ -197,7 +225,13 @@ def test_streak_and_badge_logic():
     candidate_id = candidate["candidate_id"]
 
     # Verify candidate first so we can use sessions/schedules if needed
-    client.post("/candidates/verify", json={"email": "streak.runner@example.com", "token": candidate["verification_token"]})
+    client.post(
+        "/candidates/verify",
+        json={
+            "email": "streak.runner@example.com",
+            "token": candidate["verification_token"],
+        },
+    )
 
     # Day 1: Record practice
     candidate_manager.record_practice(candidate_id)
@@ -210,7 +244,7 @@ def test_streak_and_badge_logic():
     tomorrow = utcnow() + timedelta(days=1)
     with patch("orchestrator.candidate_manager.utcnow", return_value=tomorrow):
         candidate_manager.record_practice(candidate_id)
-    
+
     cand_d2 = candidate_manager.get_candidate(candidate_id)
     assert cand_d2["practice_streak"] == 2
 
@@ -224,7 +258,7 @@ def test_streak_and_badge_logic():
     assert "3-Day Streak" in cand_d3["badges"]
 
     # Streak broken simulation (skip a day)
-    day5 = day3 + timedelta(days=2) # skip day 4
+    day5 = day3 + timedelta(days=2)  # skip day 4
     with patch("orchestrator.candidate_manager.utcnow", return_value=day5):
         candidate_manager.record_practice(candidate_id)
 
